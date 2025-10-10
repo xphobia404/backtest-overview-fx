@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trading Dashboard – Frontend Only</title>
+
+    <!-- Bootstrap -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- PapaParse & Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            background: #f6f8fa
+        }
+
+        .kpi-card {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 1px 2px rgba(16, 24, 40, .06);
+            padding: 16px
+        }
+
+        .kpi-title {
+            font-size: .85rem;
+            color: #64748b
+        }
+
+        .kpi-value {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #16a34a
+        }
+
+        .kpi-sub {
+            font-size: .8rem;
+            color: #16a34a;
+            margin-top: 6px
+        }
+
+        .grid-4 {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 14px
+        }
+
+        .block {
+            border-radius: 10px;
+            color: #fff;
+            padding: 18px;
+            min-height: 120px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between
+        }
+
+        .b-blue {
+            background: #2563eb
+        }
+
+        .b-green {
+            background: #16a34a
+        }
+
+        .b-orange {
+            background: #f97316
+        }
+
+        .b-yellow {
+            background: #f59e0b
+        }
+
+        .b-red {
+            background: #ef4444
+        }
+
+        .big-num {
+            font-size: 2rem;
+            font-weight: 700
+        }
+
+        .mini-btn {
+            background: #fff;
+            color: #334155;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: .85rem
+        }
+
+        .tabs-wrap {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-top: none;
+            border-radius: 0 0 10px 10px;
+            box-shadow: 0 1px 2px rgba(16, 24, 40, .06)
+        }
+
+        table th,
+        table td {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        table th:first-child,
+        table td:first-child {
+            text-align: left;
+        }
+
+        table#monthTable td.pm-pos,
+        table#monthTable th.pm-pos {
+            color: #0ea5e9 !important;
+        }
+
+        table#monthTable td.pm-neg,
+        table#monthTable th.pm-neg {
+            color: #ef4444 !important;
+        }
+
+        table#monthTable td.pm-dash {
+            color: #94a3b8 !important;
+        }
+
+        @media(max-width:1100px) {
+            .grid-4 {
+                grid-template-columns: repeat(2, 1fr)
+            }
+        }
+
+        @media(max-width:640px) {
+
+            .grid-4,
+            .grid-2 {
+                grid-template-columns: 1fr
+            }
+        }
+    </style>
+</head>
+
+<body class="p-4">
+
+    <!-- Modal Konfigurasi Awal -->
+    <div class="modal fade" id="configModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Konfigurasi Awal</h5>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label">Pilih Pair</label>
+                            <select id="pairSelect" class="form-select">
+                                <option value="XAUUSD">XAUUSD (Gold)</option>
+                                <option value="XAGUSD">XAGUSD (Silver)</option>
+                                <option value="EURUSD">EURUSD</option>
+                                <option value="GBPUSD">GBPUSD</option>
+                                <option value="USDJPY">USDJPY</option>
+                                <option value="CUSTOM">Custom…</option>
+                            </select>
+                            <div class="form-text">Pair untuk konversi pip → USD. Nilai default bisa diubah manual.
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Pip Size</label>
+                            <input type="number" step="0.00001" id="inputPipSize" class="form-control" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">USD per Pip per 1 Lot</label>
+                            <input type="number" step="0.01" id="inputUsdPerPipLot" class="form-control" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Modal Awal (USD)</label>
+                            <input type="number" id="inputModalAwal" class="form-control" placeholder="1000" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Lot per Trade</label>
+                            <input type="number" step="0.01" id="inputLot" class="form-control" placeholder="0.10" />
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-success" id="btnMulai">Mulai</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Detail Streak (ringkas) -->
+    <div class="modal fade" id="streakModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="streakTitle">Detail Streak</h5>
+                    <button class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3 mb-2">
+                        <div class="col-md-6">
+                            <div class="alert alert-success py-2 mb-0">
+                                <strong>Ringkasan Win Streaks:</strong> <span id="summaryWin"></span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="alert alert-danger py-2 mb-0">
+                                <strong>Ringkasan Loss Streaks:</strong> <span id="summaryLoss"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <ul class="nav nav-pills mb-3">
+                        <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab"
+                                data-bs-target="#streak-trade">By Trade (USD)</button></li>
+                        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab"
+                                data-bs-target="#streak-pips">By Pips</button></li>
+                    </ul>
+
+                    <div class="tab-content">
+                        <!-- USD -->
+                        <div class="tab-pane fade show active" id="streak-trade">
+                            <div class="table-responsive">
+                                <table class="table table-sm align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th>Type</th>
+                                            <th id="wsHeaderUSD">WS</th>
+                                            <th>Streak</th>
+                                            <th>Sum (USD)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="streakTradeBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <!-- Pips -->
+                        <div class="tab-pane fade" id="streak-pips">
+                            <div class="table-responsive">
+                                <table class="table table-sm align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th>Type</th>
+                                            <th id="wsHeaderPIPS">WS</th>
+                                            <th>Streak</th>
+                                            <th>Sum (Pips)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="streakPipsBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-muted small">Klik tombol <em>Detail</em> pada baris untuk melihat tanggal-tanggal
+                        streak tersebut.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal daftar tanggal untuk 1 panjang streak -->
+    <div class="modal fade" id="streakDatesModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h6 class="modal-title" id="streakDatesTitle">Detail Tanggal Streak</h6>
+                    <button class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped align-middle">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Start</th>
+                                    <th>End</th>
+                                    <th>Length</th>
+                                    <th>Sum</th>
+                                </tr>
+                            </thead>
+                            <tbody id="streakDatesBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2 class="fw-bold mb-3">Trading Dashboard</h2>
+
+        <div id="uploadSection" class="d-none mb-3">
+            <label class="form-label">Upload CSV (separator ; )</label>
+            <input type="file" id="csvFile" accept=".csv" class="form-control" />
+            <div class="form-text">Header: <code>Pair;Action;Tanggal Entry;Tanggal Exit;Entry;TP;SL;Keterangan</code>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <ul class="nav nav-tabs">
+            <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab"
+                    data-bs-target="#tab-overall">Overall</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-month">Per
+                    Month</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab"
+                    data-bs-target="#tab-growth">Growth</button></li>
+        </ul>
+
+        <div class="tab-content tabs-wrap p-3">
+            <div class="tab-pane fade show active" id="tab-overall">
+                <div id="overallTop" class="grid-4 mb-3"></div>
+                <div id="overallMid" class="grid-4 mb-3"></div>
+                <div id="overallBottom" class="grid-2"></div>
+            </div>
+            <div class="tab-pane fade" id="tab-month">
+                <div class="table-responsive">
+                    <table id="monthTable" class="table table-bordered table-sm align-middle mt-2"></table>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="tab-growth">
+                <canvas id="growthChart" height="110"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /* ===== Defaults Pair ===== */
+        const PAIR_DEFAULTS = {
+            XAUUSD: { pipSize: 0.01, usdPerPipLot: 1 },
+            EURUSD: { pipSize: 0.0001, usdPerPipLot: 10 },
+            GBPUSD: { pipSize: 0.0001, usdPerPipLot: 10 },
+            USDJPY: { pipSize: 0.01, usdPerPipLot: 10 },
+        };
+
+        /* ===== State & DOM ===== */
+        let pairConfig = { pipSize: 0.01, usdPerPipLot: 1 };
+        let modalAwal = 0, lot = 0, growthChart, lastCalc = null;
+        let grouped = { trade: null, pips: null }; // hasil pengelompokan untuk modal detail tanggal
+        const fileInput = document.getElementById('csvFile');
+        const topEl = document.getElementById('overallTop');
+        const midEl = document.getElementById('overallMid');
+        const botEl = document.getElementById('overallBottom');
+
+        /* ===== Config Modal ===== */
+        const configModal = new bootstrap.Modal(document.getElementById('configModal'));
+        const streakModal = new bootstrap.Modal(document.getElementById('streakModal'));
+        const datesModal = new bootstrap.Modal(document.getElementById('streakDatesModal'));
+        const selPair = document.getElementById('pairSelect');
+        const inpPipSize = document.getElementById('inputPipSize');
+        const inpUsdPerPipLot = document.getElementById('inputUsdPerPipLot');
+
+        function applyPairDefaults(code) {
+            const d = PAIR_DEFAULTS[code] || PAIR_DEFAULTS['XAUUSD'];
+            inpPipSize.value = d.pipSize;
+            inpUsdPerPipLot.value = d.usdPerPipLot;
+        }
+        window.addEventListener('DOMContentLoaded', () => {
+            selPair.value = 'XAUUSD'; applyPairDefaults('XAUUSD'); configModal.show();
+        });
+        selPair.addEventListener('change', e => {
+            if (e.target.value !== 'CUSTOM') applyPairDefaults(e.target.value);
+        });
+        document.getElementById('btnMulai').addEventListener('click', () => {
+            const pipSize = parseFloat(inpPipSize.value);
+            const usdPerPipLot = parseFloat(inpUsdPerPipLot.value);
+            modalAwal = parseFloat(document.getElementById('inputModalAwal').value) || 0;
+            lot = parseFloat(document.getElementById('inputLot').value) || 0;
+            if (!isFinite(pipSize) || pipSize <= 0) return alert('Pip Size tidak valid.');
+            if (!isFinite(usdPerPipLot) || usdPerPipLot <= 0) return alert('USD/pip/lot tidak valid.');
+            if (modalAwal <= 0 || lot <= 0) return alert('Isi modal & lot dengan benar');
+            pairConfig = { pipSize, usdPerPipLot };
+            configModal.hide();
+            document.getElementById('uploadSection').classList.remove('d-none');
+        });
+
+        /* ===== Helpers ===== */
+        const fmtMoney = n =>
+            '$' + (isFinite(n)
+                ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                : '0.00');
+        const fmtNum = n => (n === null || n === undefined) ? '-' : (Math.abs(n) >= 1000 ? n.toLocaleString(undefined, { maximumFractionDigits: 1 }) : n.toFixed(1));
+        function humanDuration(avgSec) {
+            if (!isFinite(avgSec) || avgSec <= 0) return 'N/A';
+            const d = Math.floor(avgSec / 86400);
+            const h = String(Math.floor((avgSec % 86400) / 3600)).padStart(2, '0');
+            const m = String(Math.floor((avgSec % 3600) / 60)).padStart(2, '0');
+            const s = String(Math.floor(avgSec % 60)).padStart(2, '0');
+            return `${d} Days ${h}:${m}:${s}`;
+        }
+        function buildStreaks(values, dates) {
+            const res = []; let curSign = 0, curSum = 0, curLen = 0, start = 0;
+            const signOf = v => v > 0 ? 1 : v < 0 ? -1 : 0;
+            for (let i = 0; i < values.length; i++) {
+                const s = signOf(values[i]);
+                if (s === 0) {
+                    if (curLen > 0) { res.push({ type: curSign > 0 ? 'WIN' : 'LOSS', len: curLen, sum: curSum, startDate: dates[start], endDate: dates[i - 1] }); }
+                    curSign = 0; curSum = 0; curLen = 0; continue;
+                }
+                if (curLen === 0) { curSign = s; start = i; curLen = 1; curSum = values[i]; }
+                else if (s === curSign) { curLen++; curSum += values[i]; }
+                else { res.push({ type: curSign > 0 ? 'WIN' : 'LOSS', len: curLen, sum: curSum, startDate: dates[start], endDate: dates[i - 1] }); curSign = s; start = i; curLen = 1; curSum = values[i]; }
+            }
+            if (curLen > 0) { res.push({ type: curSign > 0 ? 'WIN' : 'LOSS', len: curLen, sum: curSum, startDate: dates[start], endDate: dates.at(-1) }); }
+            res.sort((a, b) => b.len - a.len || Math.abs(b.sum) - Math.abs(a.sum));
+            return res;
+        }
+        function streakSummaryAndDist(streaks) {
+            const win = streaks.filter(s => s.type === 'WIN');
+            const loss = streaks.filter(s => s.type === 'LOSS');
+            const mapCounts = arr => {
+                const m = new Map(); arr.forEach(s => m.set(s.len, (m.get(s.len) || 0) + 1)); return m;
+            };
+            return {
+                countWin: win.length, countLoss: loss.length,
+                maxWin: win[0]?.len || 0, maxLoss: loss[0]?.len || 0,
+                countMapWin: mapCounts(win), countMapLoss: mapCounts(loss)
+            };
+        }
+        // Group by length for a given kind (WIN/LOSS)
+        function groupByLength(streaks, kind) {
+            const g = new Map(); // len -> {count,sum,items[]}
+            streaks.filter(s => s.type === kind).forEach(s => {
+                if (!g.has(s.len)) g.set(s.len, { count: 0, sum: 0, items: [] });
+                const obj = g.get(s.len);
+                obj.count += 1;
+                obj.sum += s.sum;
+                obj.items.push(s);
+            });
+            // return array sorted by length desc
+            return Array.from(g.entries()).sort((a, b) => b[0] - a[0]).map(([len, info]) => ({ len, ...info }));
+        }
+        function showDatesModal(kind, metric, len) {
+            // metric: 'trade'|'pips'
+            const title = `${kind === 'WIN' ? 'Win' : 'Loss'} Streak – Panjang ${len}`;
+            document.getElementById('streakDatesTitle').innerText = title;
+            const body = document.getElementById('streakDatesBody');
+            body.innerHTML = '';
+            const set = grouped[metric][kind].find(x => x.len === len);
+            (set?.items || []).forEach((s, i) => {
+                body.insertAdjacentHTML('beforeend',
+                    `<tr><td>${i + 1}</td><td>${s.startDate || '-'}</td><td>${s.endDate || '-'}</td><td>${s.len}</td><td>${metric === 'trade' ? fmtMoney(s.sum) : fmtNum(s.sum)}</td></tr>`
+                );
+            });
+            datesModal.show();
+        }
+
+        function openStreakModal(kind) {
+            if (!lastCalc) return;
+            document.getElementById('streakTitle').innerText =
+                (kind === 'WIN' ? 'Detail Win Streaks' : 'Detail Loss Streaks');
+
+            // ringkasan
+            document.getElementById('summaryWin').textContent =
+                `Jumlah streak: ${lastCalc.summary.countWin} | Max length: ${lastCalc.summary.maxWin}×`;
+            document.getElementById('summaryLoss').textContent =
+                `Jumlah streak: ${lastCalc.summary.countLoss} | Max length: ${lastCalc.summary.maxLoss}×`;
+
+            // header WS/LS label
+            document.getElementById('wsHeaderUSD').innerText = (kind === 'WIN' ? 'WS' : 'LS');
+            document.getElementById('wsHeaderPIPS').innerText = (kind === 'WIN' ? 'WS' : 'LS');
+
+            // group per panjang (dedup)
+            grouped.trade = {
+                WIN: groupByLength(lastCalc.streaksTrade, 'WIN'),
+                LOSS: groupByLength(lastCalc.streaksTrade, 'LOSS')
+            };
+            grouped.pips = {
+                WIN: groupByLength(lastCalc.streaksPips, 'WIN'),
+                LOSS: groupByLength(lastCalc.streaksPips, 'LOSS')
+            };
+
+            const tradeBody = document.getElementById('streakTradeBody');
+            const pipsBody = document.getElementById('streakPipsBody');
+            tradeBody.innerHTML = ''; pipsBody.innerHTML = '';
+
+            const rowsT = grouped.trade[kind];
+            rowsT.forEach(r => {
+                tradeBody.insertAdjacentHTML('beforeend',
+                    `<tr>
+            <td>${kind}</td>
+            <td>${kind === 'WIN' ? 'WS' : 'LS'} ${r.count}x</td>
+            <td>${r.len}</td>
+            <td>${fmtMoney(r.sum)}
+              <button class="btn btn-link btn-sm ms-2 p-0" onclick="showDatesModal('${kind}','trade',${r.len})">Detail</button>
+            </td>
+          </tr>`
+                );
+            });
+
+            const rowsP = grouped.pips[kind];
+            rowsP.forEach(r => {
+                pipsBody.insertAdjacentHTML('beforeend',
+                    `<tr>
+            <td>${kind}</td>
+            <td>${kind === 'WIN' ? 'WS' : 'LS'} ${r.count}x</td>
+            <td>${r.len}</td>
+            <td>${fmtNum(r.sum/10)}
+              <button class="btn btn-link btn-sm ms-2 p-0" onclick="showDatesModal('${kind}','pips',${r.len})">Detail</button>
+            </td>
+          </tr>`
+                );
+            });
+
+            streakModal.show();
+        }
+
+        /* ===== Renderers ===== */
+        function renderOverall(stats) {
+            const card = (title, value, sub = '') => `
+        <div class="kpi-card">
+          <div class="kpi-title">${title}</div>
+          <div class="kpi-value">${value}</div>
+          ${sub ? `<div class="kpi-sub">${sub}</div>` : ''}
+        </div>`;
+            topEl.innerHTML = [
+                card('Total Profit', fmtMoney(stats.totalProfit), (stats.totalProfit / modalAwal * 100).toFixed(2) + '%'),
+                card('Avg. Profit / Trade', fmtMoney(stats.avgProfitTrade), (stats.avgProfitTrade / modalAwal * 100).toFixed(2) + '%'),
+                card('Avg. Profit / Bulan', fmtMoney(stats.avgProfitMonth), (stats.avgProfitMonth / modalAwal * 100).toFixed(2) + '%'),
+                card('Avg. Profit / Tahun', fmtMoney(stats.avgProfitYear), (stats.avgProfitYear / modalAwal * 100).toFixed(2) + '%'),
+                card('Total Pips', fmtNum(stats.totalPips/10)),
+                card('Avg. Pips / Trade', fmtNum(stats.avgPipsTrade/10)),
+                card('Avg. Pips / Bulan', fmtNum(stats.avgPipsMonth/10)),
+                card('Avg. Pips / Tahun', fmtNum(stats.avgPipsYear/10))
+            ].join('');
+            midEl.innerHTML = `
+        <div class="block b-blue"><div>Total Trade</div><div class="big-num">${stats.totalTrades}x</div></div>
+        <div class="block b-green"><div>Probability</div><div class="big-num">${stats.winRate.toFixed(2)}%</div></div>
+        <div class="block b-orange"><div>Avg. Risk : Reward</div><div class="big-num">${stats.rr}</div></div>
+        <div class="block b-yellow"><div>Avg. Holding Period</div><div class="big-num" style="font-size:1.6rem">${stats.avgHoldText}</div></div>
+      `;
+            botEl.innerHTML = `
+        <div class="block b-green">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <div class="fw-semibold">Consecutive Profit</div>
+              <div class="small text-white-50">by Trade & by Pips • <strong>Jumlah Streak: ${stats.countWin} kali</strong></div>
+            </div>
+            <button id="btnWinDetail" class="mini-btn">Lihat Detail ▸</button>
+          </div>
+          <div class="d-flex justify-content-between mt-2"><div class="big-num">${stats.maxWin.len} X</div><div class="big-num">(${fmtNum(stats.maxWinPips/10)} Pips)</div></div>
+        </div>
+        <div class="block b-red">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <div class="fw-semibold">Consecutive Loss</div>
+              <div class="small text-white-50">by Trade & by Pips • <strong>Jumlah Streak: ${stats.countLoss} kali</strong></div>
+            </div>
+            <button id="btnLossDetail" class="mini-btn">Lihat Detail ▸</button>
+          </div>
+          <div class="d-flex justify-content-between mt-2"><div class="big-num">${stats.maxLoss.len} X</div><div class="big-num">(${fmtNum(stats.maxLossPips/10)} Pips)</div></div>
+        </div>
+      `;
+            document.getElementById('btnWinDetail').addEventListener('click', () => openStreakModal('WIN'));
+            document.getElementById('btnLossDetail').addEventListener('click', () => openStreakModal('LOSS'));
+        }
+
+        function renderTable(perMonth) {
+            const table = document.getElementById('monthTable');
+            const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            let html = '<thead><tr><th>Tahun</th>' + months.map(m => `<th>${m}</th>`).join('') + '<th>YTD</th></tr></thead><tbody>';
+            perMonth.forEach(row => {
+                html += `<tr><td>${row.year}</td>`;
+                months.forEach(m => {
+                    const v = row[m];
+                    if (v === null) html += `<td class="pm-dash">-</td>`;
+                    else {
+                        const cls = v > 0 ? 'pm-pos' : (v < 0 ? 'pm-neg' : '');
+                        html += `<td class="${cls}">${v.toFixed(1)}</td>`;
+                    }
+                });
+                const ycls = row.YTD > 0 ? 'pm-pos' : (row.YTD < 0 ? 'pm-neg' : '');
+                html += `<td class="${ycls} fw-semibold">${row.YTD.toFixed(1)}</td></tr>`;
+            });
+            const totalYTD = perMonth.reduce((a, r) => a + r.YTD, 0);
+            const tcls = totalYTD > 0 ? 'pm-pos' : (totalYTD < 0 ? 'pm-neg' : '');
+            html += `<tr><th>Total</th>${months.map(() => '<td></td>').join('')}<th class="${tcls} fw-semibold">${totalYTD.toFixed(1)}</th></tr>`;
+            html += '</tbody>';
+            table.innerHTML = html;
+        }
+
+        function renderChart(labels, equity) {
+            const ctx = document.getElementById('growthChart');
+            if (growthChart) growthChart.destroy();
+            growthChart = new Chart(ctx, {
+                type: 'line',
+                data: { labels, datasets: [{ label: 'Equity', data: equity, borderColor: '#16a34a', tension: .2 }] },
+                options: { scales: { x: { ticks: { autoSkip: true, maxTicksLimit: 8 } }, y: { beginAtZero: false } } }
+            });
+        }
+
+        /* ===== Perhitungan ===== */
+        function computeStats(rows) {
+            const profits = [], pipsArr = [], dates = [], holdSecs = [];
+            rows.forEach(row => {
+                const action = (row.Action || '').trim().toUpperCase();
+                const entry = parseFloat(row.Entry);
+                const tp = parseFloat(row.TP), sl = parseFloat(row.SL);
+                const note = (row.Keterangan || '').trim().toUpperCase();
+                const exit = note === 'TP' ? tp : note === 'SL' ? sl : entry;
+                if (!isFinite(entry) || !isFinite(exit)) return;
+
+                const pips = action === 'BUY' ? (exit - entry) / pairConfig.pipSize : (entry - exit) / pairConfig.pipSize;
+                pipsArr.push(pips);
+                profits.push(pips * pairConfig.usdPerPipLot * lot);
+
+                const start = new Date(row['Tanggal Entry']);
+                const end = new Date(row['Tanggal Exit'] || row['Tanggal Entry']);
+                dates.push(row['Tanggal Exit'] || row['Tanggal Entry']);
+                const sec = (end - start) / 1000; if (isFinite(sec) && sec > 0) holdSecs.push(sec);
+            });
+
+            const totalProfit = profits.reduce((a, b) => a + b, 0);
+            const totalTrades = profits.length;
+            const wins = profits.filter(x => x > 0).length;
+            const losses = profits.filter(x => x < 0).length;
+            const winRate = totalTrades ? (wins / totalTrades * 100) : 0;
+            const avgProfitTrade = totalTrades ? totalProfit / totalTrades : 0;
+
+            const avgWin = wins ? (profits.filter(x => x > 0).reduce((a, b) => a + b, 0) / wins) : 0;
+            const avgLoss = losses ? Math.abs(profits.filter(x => x < 0).reduce((a, b) => a + b, 0) / losses) : 0;
+            const rr = avgLoss ? (avgWin / avgLoss).toFixed(2) + ':1' : 'N/A';
+
+            const avgHold = holdSecs.length ? holdSecs.reduce((a, b) => a + b, 0) / holdSecs.length : NaN;
+
+            const equity = [modalAwal]; profits.forEach(p => equity.push(equity.at(-1) + p));
+
+            // Per-month (PROFIT USD)
+            const byMonthSum = {}, byMonthCnt = {};
+            rows.forEach((r, i) => {
+                const d = new Date(r['Tanggal Exit'] || r['Tanggal Entry']);
+                if (isNaN(d)) return;
+                const y = d.getFullYear(), m = d.getMonth();
+                byMonthSum[y] ??= Array(12).fill(0);
+                byMonthCnt[y] ??= Array(12).fill(0);
+                byMonthSum[y][m] += profits[i] || 0;
+                byMonthCnt[y][m] += 1;
+            });
+            const perMonth = Object.keys(byMonthSum).sort().map(y => {
+                const sumArr = byMonthSum[y], cntArr = byMonthCnt[y];
+                const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                const obj = { year: y }; let ytd = 0;
+                months.forEach((m, i) => { obj[m] = cntArr[i] > 0 ? sumArr[i] : null; ytd += sumArr[i]; });
+                obj.YTD = ytd; return obj;
+            });
+
+            // avg per bulan/tahun
+            const monthTotals = Object.values(byMonthSum).map(arr => arr.reduce((a, b) => a + b, 0));
+            const monthsCount = Object.values(byMonthCnt).reduce((acc, arr) => acc + arr.filter(x => x > 0).length, 0) || 1;
+            const yearsCount = Object.keys(byMonthSum).length || 1;
+            const avgProfitMonth = monthTotals.length ? (monthTotals.reduce((a, b) => a + b, 0) / monthsCount) : 0;
+            const avgProfitYear = monthTotals.length ? (monthTotals.reduce((a, b) => a + b, 0) / yearsCount) : 0;
+
+            const totalPips = pipsArr.reduce((a, b) => a + b, 0);
+            
+            const avgPipsTrade = totalTrades ? totalPips / totalTrades : 0;
+
+            // pips per month
+            const byMonthPips = {}, byMonthPipsCnt = {};
+            rows.forEach((r, i) => {
+                const d = new Date(r['Tanggal Exit'] || r['Tanggal Entry']);
+                if (isNaN(d)) return;
+                const y = d.getFullYear(), m = d.getMonth();
+                byMonthPips[y] ??= Array(12).fill(0);
+                byMonthPipsCnt[y] ??= Array(12).fill(0);
+                byMonthPips[y][m] += pipsArr[i] || 0;
+                byMonthPipsCnt[y][m] += 1;
+            });
+            const monthTotalsP = Object.values(byMonthPips).map(arr => arr.reduce((a, b) => a + b, 0));
+            const monthsCountP = Object.values(byMonthPipsCnt).reduce((acc, arr) => acc + arr.filter(x => x > 0).length, 0) || 1;
+            const yearsCountP = Object.keys(byMonthPips).length || 1;
+            const avgPipsMonth = monthTotalsP.length ? (monthTotalsP.reduce((a, b) => a + b, 0) / monthsCountP) : 0;
+            const avgPipsYear = monthTotalsP.length ? (monthTotalsP.reduce((a, b) => a + b, 0) / yearsCountP) : 0;
+
+            // Streaks
+            const streaksTrade = buildStreaks(profits, dates);
+            const streaksPips = buildStreaks(pipsArr, dates);
+            const summary = streakSummaryAndDist(streaksTrade);
+
+            const maxWin = streaksTrade.find(s => s.type === 'WIN') || { len: 0, sum: 0 };
+            const maxLoss = streaksTrade.find(s => s.type === 'LOSS') || { len: 0, sum: 0 };
+            const maxWinPips = maxWin.sum ? (maxWin.sum / (pairConfig.usdPerPipLot * lot)) : 0;
+            const maxLossPips = maxLoss.sum ? (-maxLoss.sum / (pairConfig.usdPerPipLot * lot)) : 0;
+
+            lastCalc = { streaksTrade, streaksPips, summary };
+
+            return {
+                totalProfit, totalTrades, winRate, avgProfitTrade,
+                rr, avgHoldText: humanDuration(avgHold),
+                maxWin, maxLoss, maxWinPips, maxLossPips,
+                countWin: summary.countWin, countLoss: summary.countLoss,
+                totalPips, avgPipsTrade, avgPipsMonth, avgPipsYear,
+                avgProfitMonth, avgProfitYear,
+                perMonth, labels: dates, equity
+            };
+        }
+
+        /* ===== File Handler ===== */
+        fileInput?.addEventListener('change', e => {
+            const f = e.target.files[0]; if (!f) return;
+            Papa.parse(f, {
+                header: true, skipEmptyLines: true, delimiter: ';',
+                complete: res => {
+                    const stats = computeStats(res.data);
+                    renderOverall(stats);
+                    renderTable(stats.perMonth);
+                    renderChart(stats.labels, stats.equity);
+                }
+            });
+        });
+    </script>
+</body>
+</html>

@@ -322,6 +322,20 @@
                 <div id="overallBottom" class="grid-2"></div>
             </div>
             <div class="tab-pane fade" id="tab-month">
+                <!-- Pilihan tampilan: USD atau Pips -->
+                <div class="d-flex align-items-center gap-3 mb-2">
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="monthView" id="monthViewUSD" value="USD"
+                            checked>
+                        <label class="form-check-label" for="monthViewUSD">USD</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="monthView" id="monthViewPIPS" value="PIPS">
+                        <label class="form-check-label" for="monthViewPIPS">Pips</label>
+                    </div>
+                    <div class="text-muted small">Pilih untuk melihat per-month dalam USD atau Pips.</div>
+                </div>
+
                 <div class="table-responsive">
                     <table id="monthTable" class="table table-bordered table-sm align-middle mt-2"></table>
                 </div>
@@ -336,6 +350,7 @@
         /* ===== Defaults Pair ===== */
         const PAIR_DEFAULTS = {
             XAUUSD: { pipSize: 0.01, usdPerPipLot: 1 },
+            XAGUSD: { pipSize: 0.01, usdPerPipLot: 0.1 },
             EURUSD: { pipSize: 0.0001, usdPerPipLot: 10 },
             GBPUSD: { pipSize: 0.0001, usdPerPipLot: 10 },
             USDJPY: { pipSize: 0.01, usdPerPipLot: 10 },
@@ -343,8 +358,10 @@
 
         /* ===== State & DOM ===== */
         let pairConfig = { pipSize: 0.01, usdPerPipLot: 1 };
-        let modalAwal = 0, lot = 0, growthChart, lastCalc = null;
+        let modalAwal = 0, lot = 0, growthChart = null, lastCalc = null;
         let grouped = { trade: null, pips: null }; // hasil pengelompokan untuk modal detail tanggal
+        let displayMonthMode = 'USD'; // default
+
         const fileInput = document.getElementById('csvFile');
         const topEl = document.getElementById('overallTop');
         const midEl = document.getElementById('overallMid');
@@ -387,7 +404,7 @@
             '$' + (isFinite(n)
                 ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                 : '0.00');
-        const fmtNum = n => (n === null || n === undefined) ? '-' : (Math.abs(n) >= 1000 ? n.toLocaleString(undefined, { maximumFractionDigits: 1 }) : n.toFixed(1));
+        const fmtNum = n => (n === null || n === undefined) ? '-' : (isFinite(n) ? (Math.abs(n) >= 1000 ? n.toLocaleString(undefined, { maximumFractionDigits: 1 }) : n.toFixed(1)) : '-');
         function humanDuration(avgSec) {
             if (!isFinite(avgSec) || avgSec <= 0) return 'N/A';
             const d = Math.floor(avgSec / 86400);
@@ -428,7 +445,7 @@
         // Group by length for a given kind (WIN/LOSS)
         function groupByLength(streaks, kind) {
             const g = new Map(); // len -> {count,sum,items[]}
-            streaks.filter(s => s.type === kind).forEach(s => {
+            (streaks || []).filter(s => s.type === kind).forEach(s => {
                 if (!g.has(s.len)) g.set(s.len, { count: 0, sum: 0, items: [] });
                 const obj = g.get(s.len);
                 obj.count += 1;
@@ -440,11 +457,12 @@
         }
         function showDatesModal(kind, metric, len) {
             // metric: 'trade'|'pips'
+            if (!grouped[metric]) return;
             const title = `${kind === 'WIN' ? 'Win' : 'Loss'} Streak – Panjang ${len}`;
             document.getElementById('streakDatesTitle').innerText = title;
             const body = document.getElementById('streakDatesBody');
             body.innerHTML = '';
-            const set = grouped[metric][kind].find(x => x.len === len);
+            const set = (grouped[metric][kind] || []).find(x => x.len === len);
             (set?.items || []).forEach((s, i) => {
                 body.insertAdjacentHTML('beforeend',
                     `<tr><td>${i + 1}</td><td>${s.startDate || '-'}</td><td>${s.endDate || '-'}</td><td>${s.len}</td><td>${metric === 'trade' ? fmtMoney(s.sum) : fmtNum(s.sum)}</td></tr>`
@@ -482,7 +500,7 @@
             const pipsBody = document.getElementById('streakPipsBody');
             tradeBody.innerHTML = ''; pipsBody.innerHTML = '';
 
-            const rowsT = grouped.trade[kind];
+            const rowsT = grouped.trade[kind] || [];
             rowsT.forEach(r => {
                 tradeBody.insertAdjacentHTML('beforeend',
                     `<tr>
@@ -496,14 +514,14 @@
                 );
             });
 
-            const rowsP = grouped.pips[kind];
+            const rowsP = grouped.pips[kind] || [];
             rowsP.forEach(r => {
                 pipsBody.insertAdjacentHTML('beforeend',
                     `<tr>
             <td>${kind}</td>
             <td>${kind === 'WIN' ? 'WS' : 'LS'} ${r.count}x</td>
             <td>${r.len}</td>
-            <td>${fmtNum(r.sum/10)}
+            <td>${fmtNum(r.sum / 10)}
               <button class="btn btn-link btn-sm ms-2 p-0" onclick="showDatesModal('${kind}','pips',${r.len})">Detail</button>
             </td>
           </tr>`
@@ -515,6 +533,10 @@
 
         /* ===== Renderers ===== */
         function renderOverall(stats) {
+            const perProf = stats.totalProfit / modalAwal * 100
+            const avgProfTr = stats.avgProfitTrade / modalAwal * 100
+            const avgProfMn = stats.avgProfitMonth / modalAwal * 100
+            const avgProfYr = stats.avgProfitMonth / modalAwal * 100
             const card = (title, value, sub = '') => `
         <div class="kpi-card">
           <div class="kpi-title">${title}</div>
@@ -522,14 +544,14 @@
           ${sub ? `<div class="kpi-sub">${sub}</div>` : ''}
         </div>`;
             topEl.innerHTML = [
-                card('Total Profit', fmtMoney(stats.totalProfit), (stats.totalProfit / modalAwal * 100).toFixed(2) + '%'),
-                card('Avg. Profit / Trade', fmtMoney(stats.avgProfitTrade), (stats.avgProfitTrade / modalAwal * 100).toFixed(2) + '%'),
-                card('Avg. Profit / Bulan', fmtMoney(stats.avgProfitMonth), (stats.avgProfitMonth / modalAwal * 100).toFixed(2) + '%'),
-                card('Avg. Profit / Tahun', fmtMoney(stats.avgProfitYear), (stats.avgProfitYear / modalAwal * 100).toFixed(2) + '%'),
-                card('Total Pips', fmtNum(stats.totalPips/10)),
-                card('Avg. Pips / Trade', fmtNum(stats.avgPipsTrade/10)),
-                card('Avg. Pips / Bulan', fmtNum(stats.avgPipsMonth/10)),
-                card('Avg. Pips / Tahun', fmtNum(stats.avgPipsYear/10))
+                card('Total Profit', fmtMoney(stats.totalProfit), fmtNum(perProf) + '%'),
+                card('Avg. Profit / Trade', fmtMoney(stats.avgProfitTrade), fmtNum(avgProfTr) + '%'),
+                card('Avg. Profit / Bulan', fmtMoney(stats.avgProfitMonth), fmtNum(avgProfMn) + '%'),
+                card('Avg. Profit / Tahun', fmtMoney(stats.avgProfitYear), fmtNum(avgProfYr) + '%'),
+                card('Total Pips', fmtNum(stats.totalPips / 10)),
+                card('Avg. Pips / Trade', fmtNum(stats.avgPipsTrade / 10)),
+                card('Avg. Pips / Bulan', fmtNum(stats.avgPipsMonth / 10)),
+                card('Avg. Pips / Tahun', fmtNum(stats.avgPipsYear / 10))
             ].join('');
             midEl.innerHTML = `
         <div class="block b-blue"><div>Total Trade</div><div class="big-num">${stats.totalTrades}x</div></div>
@@ -559,36 +581,48 @@
           <div class="d-flex justify-content-between mt-2"><div class="big-num">${stats.maxLoss.len} X</div><div class="big-num">(${fmtNum(stats.maxLossPips/10)} Pips)</div></div>
         </div>
       `;
-            document.getElementById('btnWinDetail').addEventListener('click', () => openStreakModal('WIN'));
-            document.getElementById('btnLossDetail').addEventListener('click', () => openStreakModal('LOSS'));
+            // attach listeners (remove previous to avoid duplicates)
+            setTimeout(() => {
+                const btnWin = document.getElementById('btnWinDetail');
+                const btnLoss = document.getElementById('btnLossDetail');
+                if (btnWin) { btnWin.replaceWith(btnWin.cloneNode(true)); }
+                if (btnLoss) { btnLoss.replaceWith(btnLoss.cloneNode(true)); }
+                const newWin = document.getElementById('btnWinDetail');
+                const newLoss = document.getElementById('btnLossDetail');
+                if (newWin) newWin.addEventListener('click', () => openStreakModal('WIN'));
+                if (newLoss) newLoss.addEventListener('click', () => openStreakModal('LOSS'));
+            }, 0);
         }
 
-        function renderTable(perMonth) {
+        function renderTable(perMonthObj) {
+            // perMonthObj: array of { year, Jan..Dec, YTD } where values already in either USD or Pips
             const table = document.getElementById('monthTable');
             const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
             let html = '<thead><tr><th>Tahun</th>' + months.map(m => `<th>${m}</th>`).join('') + '<th>YTD</th></tr></thead><tbody>';
-            perMonth.forEach(row => {
+            perMonthObj.forEach(row => {
                 html += `<tr><td>${row.year}</td>`;
                 months.forEach(m => {
                     const v = row[m];
                     if (v === null) html += `<td class="pm-dash">-</td>`;
                     else {
                         const cls = v > 0 ? 'pm-pos' : (v < 0 ? 'pm-neg' : '');
-                        html += `<td class="${cls}">${v.toFixed(1)}</td>`;
+                        // show with 1 decimal
+                        html += `<td class="${cls}">${fmtNum(v)}</td>`;
                     }
                 });
                 const ycls = row.YTD > 0 ? 'pm-pos' : (row.YTD < 0 ? 'pm-neg' : '');
-                html += `<td class="${ycls} fw-semibold">${row.YTD.toFixed(1)}</td></tr>`;
+                html += `<td class="${ycls} fw-semibold">${fmtNum(row.YTD)}</td></tr>`;
             });
-            const totalYTD = perMonth.reduce((a, r) => a + r.YTD, 0);
+            const totalYTD = perMonthObj.reduce((a, r) => a + (r.YTD || 0), 0);
             const tcls = totalYTD > 0 ? 'pm-pos' : (totalYTD < 0 ? 'pm-neg' : '');
-            html += `<tr><th>Total</th>${months.map(() => '<td></td>').join('')}<th class="${tcls} fw-semibold">${totalYTD.toFixed(1)}</th></tr>`;
+            html += `<tr><th>Total</th>${months.map(() => '<td></td>').join('')}<th class="${tcls} fw-semibold">${fmtNum(totalYTD)}</th></tr>`;
             html += '</tbody>';
             table.innerHTML = html;
         }
 
         function renderChart(labels, equity) {
             const ctx = document.getElementById('growthChart');
+            if (!ctx) return;
             if (growthChart) growthChart.destroy();
             growthChart = new Chart(ctx, {
                 type: 'line',
@@ -633,52 +667,53 @@
 
             const equity = [modalAwal]; profits.forEach(p => equity.push(equity.at(-1) + p));
 
-            // Per-month (PROFIT USD)
-            const byMonthSum = {}, byMonthCnt = {};
+            // Per-month (separately for USD and for Pips)
+            const byMonthUsd = {}, byMonthCntUsd = {};
+            const byMonthPips = {}, byMonthCntPips = {};
             rows.forEach((r, i) => {
                 const d = new Date(r['Tanggal Exit'] || r['Tanggal Entry']);
                 if (isNaN(d)) return;
                 const y = d.getFullYear(), m = d.getMonth();
-                byMonthSum[y] ??= Array(12).fill(0);
-                byMonthCnt[y] ??= Array(12).fill(0);
-                byMonthSum[y][m] += profits[i] || 0;
-                byMonthCnt[y][m] += 1;
-            });
-            const perMonth = Object.keys(byMonthSum).sort().map(y => {
-                const sumArr = byMonthSum[y], cntArr = byMonthCnt[y];
-                const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-                const obj = { year: y }; let ytd = 0;
-                months.forEach((m, i) => { obj[m] = cntArr[i] > 0 ? sumArr[i] : null; ytd += sumArr[i]; });
-                obj.YTD = ytd; return obj;
-            });
-
-            // avg per bulan/tahun
-            const monthTotals = Object.values(byMonthSum).map(arr => arr.reduce((a, b) => a + b, 0));
-            const monthsCount = Object.values(byMonthCnt).reduce((acc, arr) => acc + arr.filter(x => x > 0).length, 0) || 1;
-            const yearsCount = Object.keys(byMonthSum).length || 1;
-            const avgProfitMonth = monthTotals.length ? (monthTotals.reduce((a, b) => a + b, 0) / monthsCount) : 0;
-            const avgProfitYear = monthTotals.length ? (monthTotals.reduce((a, b) => a + b, 0) / yearsCount) : 0;
-
-            const totalPips = pipsArr.reduce((a, b) => a + b, 0);
-            
-            const avgPipsTrade = totalTrades ? totalPips / totalTrades : 0;
-
-            // pips per month
-            const byMonthPips = {}, byMonthPipsCnt = {};
-            rows.forEach((r, i) => {
-                const d = new Date(r['Tanggal Exit'] || r['Tanggal Entry']);
-                if (isNaN(d)) return;
-                const y = d.getFullYear(), m = d.getMonth();
+                // USD
+                byMonthUsd[y] ??= Array(12).fill(0);
+                byMonthCntUsd[y] ??= Array(12).fill(0);
+                byMonthUsd[y][m] += profits[i] || 0;
+                if (isFinite(profits[i])) byMonthCntUsd[y][m] += 1;
+                // Pips
                 byMonthPips[y] ??= Array(12).fill(0);
-                byMonthPipsCnt[y] ??= Array(12).fill(0);
-                byMonthPips[y][m] += pipsArr[i] || 0;
-                byMonthPipsCnt[y][m] += 1;
+                byMonthCntPips[y] ??= Array(12).fill(0);
+                byMonthPips[y][m] += (pipsArr[i] || 0) / 10;
+                if (isFinite(pipsArr[i])) byMonthCntPips[y][m] += 1;
             });
+
+            const makePerMonth = (byMonthSum, byMonthCnt) => {
+                return Object.keys(byMonthSum).sort().map(y => {
+                    const sumArr = byMonthSum[y], cntArr = byMonthCnt[y];
+                    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                    const obj = { year: y }; let ytd = 0;
+                    months.forEach((m, i) => { obj[m] = cntArr[i] > 0 ? sumArr[i] : null; ytd += sumArr[i]; });
+                    obj.YTD = ytd; return obj;
+                });
+            };
+            const perMonthUsd = makePerMonth(byMonthUsd, byMonthCntUsd);
+            const perMonthPips = makePerMonth(byMonthPips, byMonthCntPips);
+
+            // avg per bulan/tahun (USD)
+            const monthTotalsUsd = Object.values(byMonthUsd).map(arr => arr.reduce((a, b) => a + b, 0));
+            const monthsCountUsd = Object.values(byMonthCntUsd).reduce((acc, arr) => acc + arr.filter(x => x > 0).length, 0) || 1;
+            const yearsCountUsd = Object.keys(byMonthUsd).length || 1;
+            const avgProfitMonth = monthTotalsUsd.length ? (monthTotalsUsd.reduce((a, b) => a + b, 0) / monthsCountUsd) : 0;
+            const avgProfitYear = monthTotalsUsd.length ? (monthTotalsUsd.reduce((a, b) => a + b, 0) / yearsCountUsd) : 0;
+
+            // avg pips per month/year
             const monthTotalsP = Object.values(byMonthPips).map(arr => arr.reduce((a, b) => a + b, 0));
-            const monthsCountP = Object.values(byMonthPipsCnt).reduce((acc, arr) => acc + arr.filter(x => x > 0).length, 0) || 1;
+            const monthsCountP = Object.values(byMonthCntPips).reduce((acc, arr) => acc + arr.filter(x => x > 0).length, 0) || 1;
             const yearsCountP = Object.keys(byMonthPips).length || 1;
             const avgPipsMonth = monthTotalsP.length ? (monthTotalsP.reduce((a, b) => a + b, 0) / monthsCountP) : 0;
             const avgPipsYear = monthTotalsP.length ? (monthTotalsP.reduce((a, b) => a + b, 0) / yearsCountP) : 0;
+
+            const totalPips = pipsArr.reduce((a, b) => a + b, 0);
+            const avgPipsTrade = totalTrades ? (totalPips / totalTrades) : 0;
 
             // Streaks
             const streaksTrade = buildStreaks(profits, dates);
@@ -687,10 +722,10 @@
 
             const maxWin = streaksTrade.find(s => s.type === 'WIN') || { len: 0, sum: 0 };
             const maxLoss = streaksTrade.find(s => s.type === 'LOSS') || { len: 0, sum: 0 };
-            const maxWinPips = maxWin.sum ? (maxWin.sum / (pairConfig.usdPerPipLot * lot)) : 0;
-            const maxLossPips = maxLoss.sum ? (-maxLoss.sum / (pairConfig.usdPerPipLot * lot)) : 0;
+            const maxWinPips = (maxWin.sum) ? (maxWin.sum / (pairConfig.usdPerPipLot * lot)) : 0;
+            const maxLossPips = (maxLoss.sum) ? (-maxLoss.sum / (pairConfig.usdPerPipLot * lot)) : 0;
 
-            lastCalc = { streaksTrade, streaksPips, summary };
+            lastCalc = { streaksTrade, streaksPips, summary, perMonthUsd, perMonthPips };
 
             return {
                 totalProfit, totalTrades, winRate, avgProfitTrade,
@@ -699,7 +734,8 @@
                 countWin: summary.countWin, countLoss: summary.countLoss,
                 totalPips, avgPipsTrade, avgPipsMonth, avgPipsYear,
                 avgProfitMonth, avgProfitYear,
-                perMonth, labels: dates, equity
+                perMonthUsd, perMonthPips, labels: dates, equity,
+                streaksTrade, streaksPips, summary
             };
         }
 
@@ -711,11 +747,31 @@
                 complete: res => {
                     const stats = computeStats(res.data);
                     renderOverall(stats);
-                    renderTable(stats.perMonth);
+                    // render per-month default (USD)
+                    displayMonthMode = document.querySelector('input[name="monthView"]:checked')?.value || 'USD';
+                    if (displayMonthMode === 'USD') renderTable(stats.perMonthUsd);
+                    else renderTable(stats.perMonthPips);
                     renderChart(stats.labels, stats.equity);
                 }
             });
         });
+
+        // month view toggles
+        document.getElementById('monthViewUSD')?.addEventListener('change', (e) => {
+            if (!lastCalc) return;
+            displayMonthMode = 'USD';
+            renderTable(lastCalc.perMonthUsd);
+        });
+        document.getElementById('monthViewPIPS')?.addEventListener('change', (e) => {
+            if (!lastCalc) return;
+            displayMonthMode = 'PIPS';
+            renderTable(lastCalc.perMonthPips);
+        });
+
+        // expose helper for modal detail buttons
+        window.showDatesModal = showDatesModal;
+        window.openStreakModal = openStreakModal;
     </script>
 </body>
+
 </html>

@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Candlestick Viewer — CSV (OHLC) → JS</title>
+  <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    :root { --gap: 14px; }
+    html, body { height: 100%; margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; }
+    body { display: grid; grid-template-rows: auto 1fr auto; background: #0b0e11; color: #e5e7eb; }
+    header { display: flex; align-items: center; gap: var(--gap); padding: 10px 14px; border-bottom: 1px solid #1f2937; background: #0f1318; position: sticky; top: 0; z-index: 2; }
+    header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+    .controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap); margin-left: auto; }
+    .control { display: inline-flex; align-items: center; gap: 8px; background: #111827; border: 1px solid #1f2937; padding: 8px 10px; border-radius: 12px; }
+    .control input[type="file"] { border: none; background: transparent; color: #d1d5db; }
+    .hint { color: #9ca3af; font-size: 12px; }
+    main { display: grid; grid-template-columns: 1fr 280px; gap: var(--gap); padding: var(--gap); }
+    #chart-wrap { background: #0f1318; border: 1px solid #1f2937; border-radius: 16px; padding: 10px; position: relative; min-height: 70vh; }
+    #chart { position: absolute; inset: 10px; }
+    aside { background: #0f1318; border: 1px solid #1f2937; border-radius: 16px; padding: 14px; }
+    aside h3 { margin: 0 0 8px; font-size: 14px; }
+    .kv { font-size: 12px; color: #cbd5e1; line-height: 1.7; }
+    .dropzone { display:flex; align-items:center; justify-content:center; border:1px dashed #374151; border-radius:12px; padding:10px; min-height:48px; color:#9ca3af }
+    footer { padding: 10px 14px; border-top: 1px solid #1f2937; color: #9ca3af; background: #0f1318; font-size: 12px; }
+    button { background:#111827; border:1px solid #1f2937; color:#e5e7eb; padding:8px 12px; border-radius: 10px; cursor: pointer; }
+    button:hover { border-color:#374151 }
+    select, input[type="number"], input[type="checkbox"] { background:#0b0e11; border:1px solid #1f2937; color:#e5e7eb; padding:6px 8px; border-radius:8px; }
+    .row { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:8px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Candlestick Viewer</h1>
+    <div class="controls">
+      <label class="control" title="Upload your CSV (columns: date,time,open,high,low,close,volume)">
+        <span>Choose CSV</span>
+        <input id="fileInput" type="file" accept=".csv" />
+      </label>
+      <div class="control">
+        <label class="row" style="gap:8px;">
+          <span>Autoscale</span>
+          <input id="autoscale" type="checkbox" checked />
+        </label>
+      </div>
+      <div class="control">
+        <label class="row" style="gap:8px;">
+          <span>Show Volume</span>
+          <input id="volToggle" type="checkbox" checked />
+        </label>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="chart-wrap">
+      <div class="dropzone" id="dropzone">Drop CSV here or use the button above…</div>
+      <div id="chart" hidden></div>
+    </section>
+    <aside>
+      <h3>How your CSV should look</h3>
+      <div class="kv">
+        • No header is fine. If present, supported headers are: <code>date,time,open,high,low,close,volume</code>.<br/>
+        • Example row: <code>2010.01.04,00:00,1094.61,1099.15,1093.08,1097.87,9623</code><br/>
+        • Date format: <code>YYYY.MM.DD</code> &nbsp; Time: <code>HH:MM</code> (24h).<br/>
+        • Values may be strings; we'll coerce to numbers.
+      </div>
+      <h3 style="margin-top:14px;">Tips</h3>
+      <div class="kv">
+        • Zoom: mouse wheel. Pan: drag.
+        <br/>• Toggle autoscale via the switch above.
+        <br/>• Volume histogram can be hidden.
+      </div>
+    </aside>
+  </main>
+
+  <footer>
+    Built with TradingView <code>lightweight-charts</code> + <code>PapaParse</code>. Everything runs local in your browser.
+  </footer>
+
+<script>
+(function(){
+  // ===== DOM =====
+  const fileInput = document.getElementById('fileInput');
+  const dropzone = document.getElementById('dropzone');
+  const chartEl = document.getElementById('chart');
+  const autoscaleEl = document.getElementById('autoscale');
+  const volToggleEl = document.getElementById('volToggle');
+
+  // ===== Chart state =====
+  let chart = null;
+  let candleSeries = null;
+  let volumeSeries = null;
+
+  function ensureChart(){
+    if (chart) return chart;
+    chartEl.hidden = false;
+    dropzone.style.display = 'none';
+
+    console.log('[LWC]', 'version=', (window.LightweightCharts && window.LightweightCharts.version));
+    chart = LightweightCharts.createChart(chartEl, {
+      layout: { background: { type: 'solid', color: '#0f1318' }, textColor: '#cbd5e1' },
+      grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
+      timeScale: { timeVisible: true, secondsVisible: false, rightOffset: 4, borderColor: '#111827' },
+      rightPriceScale: { borderColor: '#111827' },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      localization: { timeFormatter: function(t){ return new Date(t*1000).toLocaleString(); } },
+      autoSize: true
+    });
+
+    if (typeof chart.addCandlestickSeries !== 'function') {
+      console.error('LightweightCharts loaded?', !!window.LightweightCharts, 'version', window.LightweightCharts && window.LightweightCharts.version);
+      alert('Grafik gagal inisialisasi: API candlestick tidak tersedia. Coba hard refresh (Ctrl+F5). Jika masih gagal, koneksi CDN mungkin diblok.');
+      return chart;
+    }
+
+    candleSeries = chart.addCandlestickSeries();
+    volumeSeries = chart.addHistogramSeries({ priceScaleId: '' });
+    chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.1, bottom: 0.25 } });
+    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+
+    // Resize handling
+    var ro = new ResizeObserver(function(){ chart.applyOptions({}); });
+    ro.observe(chartEl);
+    return chart;
+  }
+
+  // ===== Helpers =====
+  function ymdToUTCSeconds(ymd, hm){
+    if (!ymd) return NaN;
+    var fixed = String(ymd).trim().split('-').join('.');
+    var seg = fixed.split('.');
+    var Y = Number(seg[0]);
+    var M = Number(seg[1] || 1);
+    var D = Number(seg[2] || 1);
+    var t = String(hm || '00:00').trim();
+    var hhmm = t.split(':');
+    var h = Number(hhmm[0] || 0);
+    var m = Number(hhmm[1] || 0);
+    return Date.UTC(Y, M-1, D, h, m, 0) / 1000;
+  }
+
+  function tryParseDateTime(dt){
+    if (!dt) return { t: NaN, date: null, time: null };
+    var s = String(dt).trim();
+    s = s.split(',').join(' ');
+    while (s.indexOf('  ') !== -1) s = s.replace('  ', ' ');
+    var parts = s.indexOf('T') !== -1 ? s.split('T') : s.split(' ');
+    var date = parts[0];
+    var time = parts[1] || '00:00';
+    return { t: ymdToUTCSeconds(date, time), date: date, time: time };
+  }
+
+  function coerceNum(x){
+    if (x === null || x === undefined || x === '') return NaN;
+    var s = String(x);
+    s = s.split(',').join('');
+    s = s.split(' ').join('');
+    return Number(s);
+  }
+
+  function normalizeRow(row){
+    var date, time, open, high, low, close, volume, t;
+
+    if (Array.isArray(row)) {
+      var arr = row.map(function(v){ return (typeof v === 'string') ? v.trim() : v; });
+      if (arr.length >= 7) {
+        date = arr[0];
+        time = arr[1];
+        open = arr[2];
+        high = arr[3];
+        low  = arr[4];
+        close= arr[5];
+        volume=arr[6];
+        t = ymdToUTCSeconds(date, time);
+      } else if (arr.length === 6) {
+        var dt = tryParseDateTime(arr[0]);
+        t = dt.t;
+        open = arr[1];
+        high = arr[2];
+        low  = arr[3];
+        close= arr[4];
+        volume=arr[5];
+      } else {
+        return null;
+      }
+    } else if (row && typeof row === 'object') {
+      var lower = {};
+      for (var k in row) if (Object.prototype.hasOwnProperty.call(row, k)) lower[k.toLowerCase()] = k;
+      var pick = function(n){ return lower[n] ? row[lower[n]] : undefined; };
+
+      if (lower['datetime']){
+        t = tryParseDateTime(pick('datetime')).t;
+      } else if (lower['date']){
+        date = pick('date');
+        time = pick('time') || '00:00';
+        t = ymdToUTCSeconds(date, time);
+      } else {
+        var firstKey = Object.keys(row)[0];
+        t = tryParseDateTime(row[firstKey]).t;
+      }
+      open  = pick('open');
+      high  = pick('high');
+      low   = pick('low');
+      close = pick('close');
+      volume= pick('volume');
+    } else {
+      return null;
+    }
+
+    var o = coerceNum(open), h = coerceNum(high), l = coerceNum(low), c = coerceNum(close);
+    var v = (volume !== undefined) ? coerceNum(volume) : NaN;
+
+    if (!isFinite(t) || !isFinite(o) || !isFinite(h) || !isFinite(l) || !isFinite(c)) return null;
+    return { time: t, open: o, high: h, low: l, close: c, volume: isFinite(v) ? v : null };
+  }
+
+  function toSeriesData(rows){
+    var out = [];
+    for (var i=0; i<rows.length; i++){
+      var x = normalizeRow(rows[i]);
+      if (x) out.push(x);
+    }
+    out.sort(function(a,b){ return a.time - b.time; });
+    return out;
+  }
+
+  function render(data){
+    ensureChart();
+    if (!data.length){
+      alert('CSV terbaca tapi tidak ada baris valid. Pastikan kolom: date,time,open,high,low,close[,volume]');
+      return;
+    }
+    candleSeries.setData(data.map(function(d){ return { time: d.time, open: d.open, high: d.high, low: d.low, close: d.close }; }));
+    var vols = [];
+    for (var i=0; i<data.length; i++){
+      var d = data[i];
+      if (Number.isFinite ? Number.isFinite(d.volume) : isFinite(d.volume)){
+        vols.push({ time: d.time, value: d.volume });
+      }
+    }
+    volumeSeries.setData(vols);
+    if (autoscaleEl.checked) chart.timeScale().fitContent();
+    volumeSeries.applyOptions({ visible: volToggleEl.checked });
+  }
+
+  function parseWithHeader(file){
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      worker: false,
+      delimiter: '',
+      dynamicTyping: false,
+      complete: function(r){
+        console.log('[PapaParse] header mode rows:', (r.data && r.data.length) || 0);
+        render(toSeriesData(r.data || []));
+      },
+      error: function(err){
+        console.error('PapaParse error (header)', err);
+        alert('Gagal membaca CSV (header): ' + err);
+      }
+    });
+  }
+
+  function parseCSV(file){
+    Papa.parse(file, {
+      header: false,
+      skipEmptyLines: true,
+      worker: false, // safe for file://
+      delimiter: '',
+      dynamicTyping: false,
+      complete: function(res){
+        var rows = res.data || [];
+        console.log('[PapaParse] rows parsed:', rows.length);
+        var first = rows[0] || [];
+        var looksHeader = Array.isArray(first) && first.some(function(x){
+          var s = String(x).toLowerCase();
+          return s === 'date' || s === 'time' || s === 'open' || s === 'high' || s === 'low' || s === 'close' || s === 'volume' || s === 'datetime';
+        });
+        if (looksHeader){
+          parseWithHeader(file);
+        } else {
+          render(toSeriesData(rows));
+        }
+      },
+      error: function(err){
+        console.error('PapaParse error', err);
+        alert('Gagal membaca CSV: ' + err);
+      }
+    });
+  }
+
+  // ===== Events =====
+  fileInput.addEventListener('change', function(e){
+    var f = e.target.files && e.target.files[0];
+    if (f) parseCSV(f);
+  });
+
+  dropzone.addEventListener('dragover', function(e){ e.preventDefault(); dropzone.style.borderColor = '#374151'; });
+  dropzone.addEventListener('dragleave', function(){ dropzone.style.borderColor = '#1f2937'; });
+  dropzone.addEventListener('drop', function(e){
+    e.preventDefault();
+    dropzone.style.borderColor = '#1f2937';
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) parseCSV(f);
+  });
+
+  autoscaleEl.addEventListener('change', function(){
+    if (!chart) return;
+    if (autoscaleEl.checked) chart.timeScale().fitContent();
+  });
+
+  volToggleEl.addEventListener('change', function(){
+    if (!volumeSeries) return;
+    volumeSeries.applyOptions({ visible: volToggleEl.checked });
+  });
+})();
+</script>
+</body>
+</html>
